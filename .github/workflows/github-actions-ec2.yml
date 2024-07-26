@@ -1,6 +1,5 @@
-name: Push-to-EC2
+name: Deploy to EC2
 
-# Trigger deployment only on push to main branch
 on:
   push:
     branches:
@@ -12,40 +11,30 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout the files
-        uses: actions/checkout@v2
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-      - name: Deploy to Server
-        uses: easingthemes/ssh-deploy@main
-        with:
-          REMOTE_PORT: 22
-          ARGS: -rlgoDzvc
-          SSH_CMD_ARGS: -o StrictHostKeyChecking=no
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.SSHKEY }}
-          REMOTE_HOST: ${{ secrets.HOST_DNS }}
-          REMOTE_USER: ${{ secrets.USERNAME }}
-          TARGET: ${{ secrets.TARGET_DIR }}
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.HOST_DNS }} >> ~/.ssh/known_hosts
 
-      - name: Check remote directory
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.HOST_DNS }}
-          username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.SSHKEY }}
-          script: |
-            ls -la /var/www/html
-            df -h
+      - name: Deploy code to EC2
+        run: |
+          rsync -avz --exclude='.git' --exclude='.github' -e "ssh -p 22 -i ~/.ssh/id_rsa -o StrictHostKeyChecking=no" ./ ${{ secrets.USERNAME }}@${{ secrets.HOST_DNS }}:${{ secrets.TARGET_DIR }}
 
       - name: Execute remote commands
-        uses: appleboy/ssh-action@master
+        uses: appleboy/ssh-action@v0.1.5
         with:
           host: ${{ secrets.HOST_DNS }}
           username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.SSHKEY }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             sudo apt-get -y update
             sudo apt-get install -y apache2
             sudo systemctl start apache2
             sudo systemctl enable apache2
-            sudo mv /home/username/* /var/www/html
+            sudo chown -R www-data:www-data /var/www/html
+            sudo chmod -R 755 /var/www/html
